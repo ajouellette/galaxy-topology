@@ -2,3 +2,13 @@
 __pycache__
 
 .batch.txt
+
+*.out
+*.err
+
+Illustris/
+TNG50/
+TNG100/
+TNG300/
+camels/
+camels-sam/
