@@ -11,19 +11,6 @@ from alpha_complex_periodic import calc_persistence
 import illustris_python as tng
 
 
-alpha_resolution_factor = 50
-scaled_range = [0, 5]
-scaled_resolution = 500
-alpha_scaled = np.linspace(*scaled_range, scaled_resolution)
-
-halo_mass_cut = 1e10
-halo_match = True
-st_mass_cut = 2e8
-dm_frac_cut = 0.1
-ssfr_cut = 10**-10.5
-ssfr_match = True
-
-
 def load_camels(sim_name, snap_num=-1):
     if snap_num == -1:
         files = glob.glob(sim_name + "/fof_subhalo_tab_*.hdf5")
@@ -66,8 +53,9 @@ def load_illustris(sim_name, snap_num=-1):
 
 
 def load_sam(sim_name, snap_num=-1):
+    base_name = "/../rockstar_" if "1P" in sim_name else "/rockstar_"
     if snap_num == -1:
-        rockstar = glob.glob(sim_name + "/rockstar_*.hdf5")
+        rockstar = glob.glob(sim_name + base_name + "*.hdf5")
         if len(rockstar) == 0:
             raise ValueError("No rockstar files found in "+sim_name)
         rockstar.sort()
@@ -78,7 +66,7 @@ def load_sam(sim_name, snap_num=-1):
         sam.sort()
         sam_fname = sam[-1]
     else:
-        rockstar_fname = sim_name + f"/rockstar_{snap_num:02}.hdf5"
+        rockstar_fname = sim_name + base_name + f"{snap_num:02}.hdf5"
         sam_fname = sim_name + f"/sc_sam_tab_{snap_num:02}.hdf5"
 
     h = 0.6711
@@ -93,7 +81,10 @@ def load_sam(sim_name, snap_num=-1):
         data["SubhaloPos"][data["SubhaloPos"] >= data["boxsize"]] -= data["boxsize"]
         data["SubhaloMass"] = np.zeros((len(data["SubhaloPos"]), 5))
         data["SubhaloMass"][:,4] = f["galprop/mstar"][:] * 1e9 * h
+        data["SubhaloHaloMass"] = f["galprop/mhalo"][:] * 1e9 * h
+        data["SubhaloHaloIndex"] = f["galprop/halo_index"][:]
         data["SubhaloSFR"] = f["galprop/sfr"][:]
+        data["SubhaloCentral"] = f["galprop/sat_type"][:] == 0
 
     return data
 
@@ -121,6 +112,22 @@ def camels_sam_params(sam_params):
 
 
 def main():
+    alpha_resolution_factor = 50
+    scaled_range = [0, 5]
+    scaled_resolution = 500
+    alpha_scaled = np.linspace(*scaled_range, scaled_resolution)
+
+    min_halo_mass_cut = 2e10
+    halo_match = True
+
+    st_mass_cut = 2e8
+    dm_frac_cut = 0.1
+    max_halo_cut = None
+    satellites = None
+
+    ssfr_cut = 10**-11
+    ssfr_match = False
+
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     n_ranks = comm.Get_size()
@@ -131,6 +138,8 @@ def main():
         sims = [suite,]
     if "camels" in suite:
         sim_set = sys.argv[2]
+        if sim_set not in ["CV", "1P", "LH", "EX"]:
+            raise ValueError("Unknown simulation set.")
 
         if sim_set == "EX":
             sims = [f"{suite}/{sim_set}_0", f"{suite}/{sim_set}_3"]
@@ -142,6 +151,12 @@ def main():
                 dup_fname = suite + '/' + dup
                 if dup_fname in sims:
                     sims.remove(dup_fname)
+
+        if "sam" in suite and sim_set == "1P":
+            sims = glob.glob(suite + "/CV_*/1P_*")
+
+    if len(sims) == 0:
+        raise ValueError("No simulations found matching given criteria")
 
     if rank == 0:
         print(f"{rank} Found {len(sims)} sims")
@@ -192,6 +207,16 @@ def main():
         else:
             # for SAM, only need stellar mass cut
             galaxy = data["SubhaloMass"][:,4] > st_mass_cut
+            # filter out galaxy clusters
+            #if max_halo_cut is not None:
+            #    halo_indicies = data["SubhaloHaloMass"] >= max_halo_cut
+            #    galaxy *= ~np.isin(data["SubhaloHaloIndex"], halo_indicies)
+            # filter out satellites
+            if satellites is not None:
+                if satellite:
+                    galaxy *= ~data["SubhaloCentral"]
+                else:
+                    galaxy *= data["SubhaloCentral"]
         galaxy_selection = data["SubhaloPos"][galaxy]
 
         if not halo_match:
@@ -276,7 +301,7 @@ def main():
         suite_name = suite.split('/')[-1]
         save_dir = f"topology_summaries/{suite_name}"
         os.makedirs(save_dir, exist_ok=True)
-        save_fname = save_dir + f"/es{'_'+sim_set if sim_set is not None else ''}_all2.npz"
+        save_fname = save_dir + f"/es{'_'+sim_set if sim_set is not None else ''}_all.npz"
         print(f"Saving data to {save_fname}")
         np.savez(save_fname, params=params, alpha=alpha, alpha_scaled=alpha_scaled,
                 es=es, es_scaled=es_scaled, n_selected=n_selected, lbars=lbars,
