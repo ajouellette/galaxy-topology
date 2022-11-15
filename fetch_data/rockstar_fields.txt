@@ -1,0 +1,16 @@
+#ID DescID Mvir Vmax Vrms Rvir Rs Np X Y Z VX VY VZ JX JY JZ Spin rs_klypin Mvir_all M200b M200c M500c M2500c Xoff Voff spin_bullock b_to_a c_to_a A[x] A[y] A[z] b_to_a(500c) c_to_a(500c) A[x](500c) A[y](500c) A[z](500c) T/|U| M_pe_Behroozi M_pe_Diemer Halfmass_Radius
+#a = 1.000000
+#Om = 0.300000; Ol = 0.700000; h = 0.671100
+#FOF linking length: 0.280000
+#Unbound Threshold: 0.500000; FOF Refinement Threshold: 0.700000
+#Particle mass: 3.17631e+08 Msun/h
+#Box size: 100.000000 Mpc/h
+#Force resolution assumed: 0.004 Mpc/h
+#Units: Masses in Msun / h
+#Units: Positions in Mpc / h (comoving)
+#Units: Velocities in km / s (physical, peculiar)
+#Units: Halo Distances, Lengths, and Radii in kpc / h (comoving)
+#Units: Angular Momenta in (Msun/h) * (Mpc/h) * km/s (physical)
+#Units: Spins are dimensionless
+#Np is an internal debugging quantity.
+#Rockstar Version: 0.99.9-RC3+

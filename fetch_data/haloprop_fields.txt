@@ -1,0 +1,22 @@
+# 0 halo_index
+# 1 halo_id
+# 2 roothaloid
+# 3 orighaloid
+# 4 redshift
+# 5 m_vir [1.0E09 Msun]
+# 6 c_nfw []
+# 7 spin []
+# 8 m_hot [1.0E09 Msun]
+# 9 mstar_diffuse [1.0E09 Msun]
+# 10 mass_ejected [1.0E09 Msun]
+# 11 mcooldot [1.0E09 Msun/yr]
+# 12 maccdot_pristine [Msun/yr]
+# 13 maccdot_reaccrete [Msun/yr]
+# 14 maccdot_metal_reaccrete [Msun/Zsun/yr]
+# 15 maccdot_metal [Msun/Zsun/yr]
+# 16 mdot_eject [Msun/yr]
+# 17 mdot_metal_eject [Msun/Zsun/yr]
+# 18 maccdot_radio [Msun/yr]
+# 19 Metal_hot [1.0E09 Msun/Zsun]
+# 20 Metal_ejected [1.0E09 Msun/Zsun]
+# 21 snap_num
