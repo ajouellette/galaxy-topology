@@ -1,17 +1,19 @@
-import sys
-import os
 import glob
-import numpy as np
-from scipy.interpolate import interp1d
-import h5py
-from mpi4py import MPI
-import gudhi as gd
+import os
+import sys
+
 import gudhi.representations as gdr
-from alpha_complex_periodic import calc_persistence
+import h5py
 import illustris_python as tng
+import numpy as np
+from alpha_complex_periodic import calc_persistence
+from mpi4py import MPI
+from scipy.interpolate import interp1d
 
 
 def load_camels(sim_name, snap_num=-1):
+    """Load a CAMELS-IllustrisTNG sim."""
+
     if snap_num == -1:
         files = glob.glob(sim_name + "/fof_subhalo_tab_*.hdf5")
         if len(files) == 0:
@@ -33,6 +35,8 @@ def load_camels(sim_name, snap_num=-1):
 
 
 def load_illustris(sim_name, snap_num=-1):
+    """Load an Illustris or TNG sim."""
+
     if snap_num == -1:
         snaps = glob.glob(sim_name + "/groups_*")
         if len(snaps) == 0:
@@ -53,6 +57,8 @@ def load_illustris(sim_name, snap_num=-1):
 
 
 def load_sam(sim_name, snap_num=-1):
+    """Load a CAMELS-SAM sim."""
+
     base_name = "/../rockstar_" if "1P" in sim_name else "/rockstar_"
     if snap_num == -1:
         rockstar = glob.glob(sim_name + base_name + "*.hdf5")
@@ -98,12 +104,14 @@ def calc_summary(point_sets, summary, boxsize=None):
         try:
             pairs.append(calc_persistence(points, boxsize=boxsize, precision="fast"))
         except ValueError:
-            pairs.append(3 * [np.zeros((1,2))])  # fake data, should result in NaNs when calculating summary
+            pairs.append(3 * [np.zeros((1,2))])  # fake data, should result in NaNs in summary
     pairs = [[np.array(p[d]) for d in range(3)] for p in pairs]
     return np.array([summary.fit_transform(DS.fit_transform(p)) for p in pairs])
 
 
 def camels_sam_params(sam_params):
+    """Get CAMELS parameter values from SAM parameter values."""
+
     params = np.copy(sam_params[:,:5])
     params[:,2] /= 1.7
     params[:,3] -= 3
@@ -112,21 +120,22 @@ def camels_sam_params(sam_params):
 
 
 def main():
-    alpha_resolution_factor = 50
-    scaled_range = [0, 5]
-    scaled_resolution = 500
+    alpha_resolution_factor = 50  # number of alpha grid points per Mpc
+    scaled_range = [0, 5]  # range of alpha / l
+    scaled_resolution = 500  # resolution of alpha / l
     alpha_scaled = np.linspace(*scaled_range, scaled_resolution)
 
-    min_halo_mass_cut = 2e10
-    halo_match = True
+    min_halo_mass_cut = 5e10  # minimum mass cut when selecting DM halos
+    halo_match = True  # match number of galaxies and halos
+    halo_random_sample = True  # randomly sample halos or pick N most massive
 
-    st_mass_cut = 2e8
-    dm_frac_cut = 0.1
-    max_halo_cut = None
-    satellites = None
+    st_mass_cut = 2e8  # min stellar mass cut for galaxies
+    dm_frac_cut = 0.1  # min DM mass fraction for galaxies
+    max_halo_cut = None  # max halo mass for galaxies
+    satellites = None  # whether to consider only satellites (centrals)
 
-    ssfr_cut = 10**-11
-    ssfr_match = False
+    ssfr_cut = 10**-11  # sSFR cut for quiescent/star-forming
+    ssfr_match = False  # whether to match number of quiescent/star-forming galaxies
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -208,25 +217,32 @@ def main():
             # for SAM, only need stellar mass cut
             galaxy = data["SubhaloMass"][:,4] > st_mass_cut
             # filter out galaxy clusters
-            #if max_halo_cut is not None:
-            #    halo_indicies = data["SubhaloHaloMass"] >= max_halo_cut
-            #    galaxy *= ~np.isin(data["SubhaloHaloIndex"], halo_indicies)
+            if max_halo_cut is not None:
+                halo_indicies = data["SubhaloHaloMass"] >= max_halo_cut
+                galaxy *= ~np.isin(data["SubhaloHaloIndex"], halo_indicies)
             # filter out satellites
             if satellites is not None:
-                if satellite:
+                if satellites:
                     galaxy *= ~data["SubhaloCentral"]
                 else:
                     galaxy *= data["SubhaloCentral"]
         galaxy_selection = data["SubhaloPos"][galaxy]
 
         if not halo_match:
-            halo_selection = data["HaloPos"][data["HaloMass"] > halo_mass_cut]
+            halo_selection = data["HaloPos"][data["HaloMass"] > min_halo_mass_cut]
         else:
-            halo = np.isin(np.arange(len(data["HaloPos"])), np.argsort(data["HaloMass"])[::-1][:len(galaxy_selection)])
+            n_halos = len(galaxy_selection)
+            if halo_random_sample:
+                halo = np.nonzero(data["HaloMass"] > min_halo_mass_cut)[0]
+                halo = np.random.choice(halo, size=min(len(halo), n_halos), replace=False)
+            else:
+                halo = np.isin(np.arange(len(data["HaloPos"])),
+                        np.argsort(data["HaloMass"])[::-1][:n_halos])
+
             halo_selection = data["HaloPos"][halo]
-            halo_mass_cut = np.min(data["HaloMass"][halo])
-            halo_mass_cuts.append(halo_mass_cut)
-            print(f"Halo mass cut: {halo_mass_cut:.3e}")
+            min_halo_mass_cut = np.min(data["HaloMass"][halo])
+            halo_mass_cuts.append(min_halo_mass_cut)
+            print(f"Halo mass cut: {min_halo_mass_cut:.3e}")
 
         ssfr = data["SubhaloSFR"][galaxy] / data["SubhaloMass"][galaxy][:,4]
         if not ssfr_match:
@@ -305,7 +321,7 @@ def main():
         print(f"Saving data to {save_fname}")
         np.savez(save_fname, params=params, alpha=alpha, alpha_scaled=alpha_scaled,
                 es=es, es_scaled=es_scaled, n_selected=n_selected, lbars=lbars,
-                halo_mass_cut=halo_mass_cuts if halo_match else halo_mass_cut,
+                halo_mass_cut=halo_mass_cuts if halo_match else min_halo_mass_cut,
                 gal_ssfr_cut=ssfr_cuts if ssfr_match else ssfr_cut,
                 gal_st_mass_cut=st_mass_cut, gal_dm_frac_cut=dm_frac_cut)
 
