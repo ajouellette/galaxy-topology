@@ -2,6 +2,7 @@ import glob
 import os
 import sys
 
+from Corrfunc.theory.xi import xi as calc_xi
 import gudhi.representations as gdr
 import h5py
 import illustris_python as tng
@@ -134,8 +135,11 @@ def main():
     max_halo_cut = None  # max halo mass for galaxies
     satellites = None  # whether to consider only satellites (centrals)
 
-    ssfr_cut = 10**-11  # sSFR cut for quiescent/star-forming
+    ssfr_cut = 10**-10.5  # sSFR cut for quiescent/star-forming
     ssfr_match = False  # whether to match number of quiescent/star-forming galaxies
+
+    calc_2pcf = True  # whether to calculate 2-point correlation functions
+    n_rbins = 50  # number of r bins for 2pcf
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -143,10 +147,18 @@ def main():
 
     suite = sys.argv[1]
     if "Illustris" in suite or "TNG" in suite:
+        if len(sys.argv) > 2:
+            save_suffix = sys.argv[2]
+        else:
+            save_suffix = None
         sim_set = None
         sims = [suite,]
     if "camels" in suite:
         sim_set = sys.argv[2]
+        if len(sys.argv) > 3:
+            save_suffix = sys.argv[3]
+        else:
+            save_suffix = None
         if sim_set not in ["CV", "1P", "LH", "EX"]:
             raise ValueError("Unknown simulation set.")
 
@@ -176,6 +188,8 @@ def main():
 
     params_all = []
     n_selected_all = []
+    xi_all = []
+    xi_ravg_all = []
     lbars_all = []
     es_all = []
     es_scaled_all = []
@@ -261,6 +275,18 @@ def main():
         n_selected_all.append(n_selected)
         print("Selections:", n_selected)
 
+        if calc_2pcf:
+            print("Computing 2PCFs...")
+            rbins = np.logspace(-0.5, np.log10(boxsize/3.1), n_rbins)
+            xi = np.zeros((len(pos_list), n_rbins-1))
+            xi_ravg = np.zeros_like(xi)
+            for i, points in enumerate(pos_list):
+                xi_sample = calc_xi(boxsize, 1, rbins, *points.T, output_ravg=True)
+                xi[i] = xi_sample["xi"]
+                xi_ravg[i] = xi_sample["ravg"]
+            xi_all.append(xi)
+            xi_ravg_all.append(xi_ravg)
+
         print("Computing topological summaries...")
         es = calc_summary(pos_list, ES, boxsize=boxsize)
         norm = np.trapz(np.abs(es), alpha, axis=-1)
@@ -281,6 +307,8 @@ def main():
 
     params_all = np.array(params_all)
     n_selected_all = np.array(n_selected_all)
+    xi_all = np.array(xi_all)
+    xi_ravg_all = np.array(xi_ravg_all)
     lbars_all = np.array(lbars_all)
     es_all = np.array(es_all)
     es_scaled_all = np.array(es_scaled_all)
@@ -293,6 +321,9 @@ def main():
 
     params_all = comm.gather(params_all)
     n_selected_all = comm.gather(n_selected_all)
+    if calc_2pcf:
+        xi_all = comm.gather(xi_all)
+        xi_ravg_all = comm.gather(xi_ravg_all)
     lbars_all = comm.gather(lbars_all)
     es_all = comm.gather(es_all)
     es_scaled_all = comm.gather(es_scaled_all)
@@ -306,6 +337,9 @@ def main():
         if "camels-sam" in suite:
             params = camels_sam_params(params)
         n_selected = np.vstack(n_selected_all)
+        if calc_2pcf:
+            xi_all = np.vstack(xi_all)
+            xi_ravg_all = np.vstack(xi_ravg_all)
         lbars = np.vstack(lbars_all)
         es = np.vstack(es_all)
         es_scaled = np.vstack(es_scaled_all)
@@ -317,13 +351,15 @@ def main():
         suite_name = suite.split('/')[-1]
         save_dir = f"topology_summaries/{suite_name}"
         os.makedirs(save_dir, exist_ok=True)
-        save_fname = save_dir + f"/es{'_'+sim_set if sim_set is not None else ''}_all.npz"
+        save_fname = save_dir + f"/es{'_'+sim_set if sim_set is not None else ''}_all{'_'+save_suffix if save_suffix is not None else ''}.npz"
         print(f"Saving data to {save_fname}")
         np.savez(save_fname, params=params, alpha=alpha, alpha_scaled=alpha_scaled,
                 es=es, es_scaled=es_scaled, n_selected=n_selected, lbars=lbars,
                 halo_mass_cut=halo_mass_cuts if halo_match else min_halo_mass_cut,
                 gal_ssfr_cut=ssfr_cuts if ssfr_match else ssfr_cut,
-                gal_st_mass_cut=st_mass_cut, gal_dm_frac_cut=dm_frac_cut)
+                gal_st_mass_cut=st_mass_cut, gal_dm_frac_cut=dm_frac_cut,
+                xi_ravg = xi_ravg_all if calc_2pcf else None,
+                xi = xi_all if calc_2pcf else None)
 
 
 if __name__ == "__main__":
