@@ -107,6 +107,9 @@ def calc_summary(point_sets, summary, boxsize=None):
         except ValueError:
             pairs.append(3 * [np.zeros((1,2))])  # fake data, should result in NaNs in summary
     pairs = [[np.array(p[d]) for d in range(3)] for p in pairs]
+    if isinstance(summary, list):
+        return [np.array([func.fit_transform(DS.fit_transform(p)) for p in pairs]) for func in summary]
+
     return np.array([summary.fit_transform(DS.fit_transform(p)) for p in pairs])
 
 
@@ -130,7 +133,7 @@ def main():
     halo_match = True  # match number of galaxies and halos
     halo_random_sample = True  # randomly sample halos or pick N most massive
 
-    st_mass_cut = 2e8  # min stellar mass cut for galaxies
+    st_mass_cut = 5e8  # min stellar mass cut for galaxies
     dm_frac_cut = 0.1  # min DM mass fraction for galaxies
     max_halo_cut = None  # max halo mass for galaxies
     satellites = None  # whether to consider only satellites (centrals)
@@ -192,7 +195,9 @@ def main():
     xi_ravg_all = []
     lbars_all = []
     es_all = []
+    bc_all = []
     es_scaled_all = []
+    bc_scaled_all = []
     halo_mass_cuts = []
     ssfr_cuts = []
 
@@ -221,6 +226,7 @@ def main():
 
         ES = gdr.Entropy(mode="vector", resolution=alpha_resolution, sample_range=alpha_range,
                 normalized=False)
+        BC = gdr.BettiCurve(resolution=alpha_resolution, sample_range=alpha_range)
 
         if "sam" not in sim:
             tot_sh_mass = np.sum(data["SubhaloMass"], axis=1)
@@ -288,22 +294,29 @@ def main():
             xi_ravg_all.append(xi_ravg)
 
         print("Computing topological summaries...")
-        es = calc_summary(pos_list, ES, boxsize=boxsize)
+        es, bc = calc_summary(pos_list, [ES, BC], boxsize=boxsize)
+        bc = bc / boxsize**3
         norm = np.trapz(np.abs(es), alpha, axis=-1)
         es /= np.expand_dims(norm, -1)
         es_all.append(es)
+        bc_all.append(bc)
 
         print("Scaling and interpolating summaries...")
         lbars = np.array([boxsize/np.cbrt(n) for n in n_selected])
         lbars_all.append(lbars)
         es_scaled = np.zeros((len(es), 3, scaled_resolution))
+        bc_scaled = np.zeros_like(es_scaled)
         for i in range(len(es)):
-            interp = interp1d(alpha/lbars[i], es[i], axis=-1, bounds_error=False, fill_value=0,
+            interp_es = interp1d(alpha/lbars[i], es[i], axis=-1, bounds_error=False, fill_value=0,
                     assume_sorted=True)
-            es_scaled[i] = interp(alpha_scaled)
+            es_scaled[i] = interp_es(alpha_scaled)
+            interp_bc = interp1d(alpha / lbars[i], bc[i], axis=-1, bounds_error=False, fill_value=0,
+                    assume_sorted=True)
+            bc_scaled[i] = interp_bc(alpha_scaled) * lbars[i]**3
         norm = np.trapz(np.abs(es_scaled), alpha_scaled, axis=-1)
         es_scaled /= np.expand_dims(norm, -1)
         es_scaled_all.append(es_scaled)
+        bc_scaled_all.append(bc_scaled)
 
     params_all = np.array(params_all)
     n_selected_all = np.array(n_selected_all)
@@ -311,7 +324,9 @@ def main():
     xi_ravg_all = np.array(xi_ravg_all)
     lbars_all = np.array(lbars_all)
     es_all = np.array(es_all)
+    bc_all = np.array(bc_all)
     es_scaled_all = np.array(es_scaled_all)
+    bc_scaled_all = np.array(bc_scaled_all)
     halo_mass_cuts = np.array(halo_mass_cuts)
     ssfr_cuts = np.array(ssfr_cuts)
 
@@ -326,7 +341,9 @@ def main():
         xi_ravg_all = comm.gather(xi_ravg_all)
     lbars_all = comm.gather(lbars_all)
     es_all = comm.gather(es_all)
+    bc_all = comm.gather(bc_all)
     es_scaled_all = comm.gather(es_scaled_all)
+    bc_scaled_all = comm.gather(bc_scaled_all)
     if halo_match:
         halo_mass_cuts = comm.gather(halo_mass_cuts)
     if ssfr_match:
@@ -342,7 +359,9 @@ def main():
             xi_ravg_all = np.vstack(xi_ravg_all)
         lbars = np.vstack(lbars_all)
         es = np.vstack(es_all)
+        bc = np.vstack(bc_all)
         es_scaled = np.vstack(es_scaled_all)
+        bc_scaled = np.vstack(bc_scaled_all)
         if halo_match:
             halo_mass_cuts = np.hstack(halo_mass_cuts)
         if ssfr_match:
@@ -354,12 +373,13 @@ def main():
         save_fname = save_dir + f"/es{'_'+sim_set if sim_set is not None else ''}_all{'_'+save_suffix if save_suffix is not None else ''}.npz"
         print(f"Saving data to {save_fname}")
         np.savez(save_fname, params=params, alpha=alpha, alpha_scaled=alpha_scaled,
-                es=es, es_scaled=es_scaled, n_selected=n_selected, lbars=lbars,
+                es=es, es_scaled=es_scaled, bc=bc, bc_scaled=bc_scaled,
+                n_selected=n_selected, lbars=lbars,
                 halo_mass_cut=halo_mass_cuts if halo_match else min_halo_mass_cut,
                 gal_ssfr_cut=ssfr_cuts if ssfr_match else ssfr_cut,
                 gal_st_mass_cut=st_mass_cut, gal_dm_frac_cut=dm_frac_cut,
-                xi_ravg = xi_ravg_all if calc_2pcf else None,
-                xi = xi_all if calc_2pcf else None)
+                xi_ravg=xi_ravg_all if calc_2pcf else None,
+                xi=xi_all if calc_2pcf else None)
 
 
 if __name__ == "__main__":
