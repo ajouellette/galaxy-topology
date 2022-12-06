@@ -51,7 +51,7 @@ def main():
     start, end = offset[rank], offset[rank]+count[rank]
     es, bc = calc_summary(pos_list[start:end], [ES, BC], boxsize=boxsize)
     norm = np.trapz(np.abs(es), alpha, axis=-1)
-    es = es / np.expand_dims(norm, 1)
+    es = es / np.expand_dims(norm, 2)
     bc = bc / boxsize**3
 
     print(f"{rank} Scaling and interpolating ES curves")
@@ -60,11 +60,11 @@ def main():
     for i in range(len(es)):
         lbar = lbar_vals[start+i]
         interp_es = interp1d(alpha/lbar, es[i], axis=-1, bounds_error=False, fill_value=0, assume_sorted=True)
-        es_scaled[i] = interp(alpha_scaled)
+        es_scaled[i] = interp_es(alpha_scaled)
         interp_bc = interp1d(alpha/lbar, bc[i], axis=-1, bounds_error=False, fill_value=0, assume_sorted=True)
         bc_scaled[i] = interp_bc(alpha_scaled) * lbar**3
     norm_scaled = np.trapz(np.abs(es_scaled), alpha_scaled, axis=-1)
-    es_scaled = es_scaled / np.expand_dims(norm_scaled, 1)
+    es_scaled = es_scaled / np.expand_dims(norm_scaled, 2)
 
     comm.Barrier()
     if rank == 0:
