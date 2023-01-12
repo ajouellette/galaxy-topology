@@ -40,6 +40,7 @@ for i in trange(total_samples):
 
     pbl = pb.LogNormalPowerBox(N_grid, dim=3, pk=lambda k: A/k**n, boxlength=boxsize)
     data.append(pbl.create_discrete_sample(nbar, min_at_zero=True))
+    del pbl
 
 N_vals = np.array([len(pos) for pos in data])
 lbar_vals = boxsize / np.cbrt(N_vals)
