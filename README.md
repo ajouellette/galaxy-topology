@@ -11,3 +11,7 @@ Code to compute persistent homology of galaxy and dark matter halo distributions
 [``Corrfunc``](https://github.com/manodeep/Corrfunc) - to calculate 2-point correlation functions
 
 [``illustris_python``](https://github.com/illustristng/illustris_python) - to read IllustrisTNG data
+
+
+## Paper
+This is the code associated with https://arxiv.org/abs/2302.01363.
