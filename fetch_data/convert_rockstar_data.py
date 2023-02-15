@@ -8,21 +8,24 @@ import h5py
 def read_rockstar(fname):
     a = 1
     boxsize = 0
+    h = 0.67
     with open(fname) as f:
         col_names = f.readline().lstrip('#').split()
         for i in range(10):
             line = f.readline()
             if line.startswith("#a"):
                 a = float(line.split()[-1])
-            if line.startswith("#Box"):
+            elif line.startswith("#Box"):
                 boxsize = float(line.split()[2])
+            elif line.startswith("#Om"):
+                h = float(line.split()[-1])
     redshift = 1/a - 1
 
     use_cols = ["Mvir", "M200c", "M200b", "X", "Y", "Z"]
 
     data = pd.read_csv(fname, comment='#', sep=' ', names=col_names, usecols=use_cols, dtype='f4')
 
-    return redshift, boxsize, data
+    return redshift, boxsize, h, data
 
 
 
@@ -39,7 +42,7 @@ def main():
     for i, catalog in enumerate(catalogs[10:]):
         fname = catalog + f"out_{snap_num}.list"
         print(i, fname)
-        redshift, boxsize, data = read_rockstar(fname)
+        redshift, boxsize, _, data = read_rockstar(fname)
         print(f"\t{len(data)} halos found")
         sim_name = fname.split('/')[-3]
         save_name = save_dir + '/' + sim_name + f"/rockstar_{snap_num:0{digits}}.hdf5"
