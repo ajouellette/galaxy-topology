@@ -1,5 +1,6 @@
 import os
 import sys
+import glob
 import numpy as np
 import h5py
 import pandas as pd
@@ -30,19 +31,20 @@ def read_sam(root_dir, g_fields=None, h_fields=None):
                   'tmerge', 'tmajmerge', 'mu_merge', 't_sat', 'r_fric', 'x_position',
                   'y_position', 'z_position', 'vx', 'vy', 'vz']
         if g_fields is None:
-            g_fields = lambda x: x not in ["sfrave20myr", "sfrave100myr", "sfrave1gyr", "tmerge", "tmajmerge",
-                                           "mu_merge", "mass_outflow_rate", "metal_outflow_rate", "maccdot",
-                                           "maccdot_radio", "r_fric"]
+            g_fields = lambda x: x not in ["sfrave20myr", "sfrave100myr", "sfrave1gyr", "tmerge",
+                                            "tmajmerge", "mu_merge", "mass_outflow_rate",
+                                            "metal_outflow_rate", "maccdot", "maccdot_radio",
+                                            "r_fric"]
         g_dtypes = {"halo_index": 'u4', "birthhaloid": 'u4', "roothaloid": 'u4', "sat_type": 'u4'}
         for colname in g_colnames:
             if colname not in g_dtypes.keys():
                 g_dtypes[colname] = 'f4'
 
-        h_colnames = ['halo_index', 'halo_id', 'roothaloid', 'orig_halo_ID', 'redshift', 'm_vir', 'c_nfw',
-                  'spin', 'm_hot', 'mstar_diffuse', 'mass_ejected', 'mcooldot',
-                  'maccdot_pristine', 'maccdot_reaccrete', 'maccdot_metal_reaccrete',
-                  'maccdot_metal', 'mdot_eject', 'mdot_metal_eject', 'maccdot_radio',
-                  'Metal_hot', 'Metal_ejected', 'snap_num']
+        h_colnames = ['halo_index', 'halo_id', 'roothaloid', 'orig_halo_ID', 'redshift', 'm_vir',
+                    'c_nfw', 'spin', 'm_hot', 'mstar_diffuse', 'mass_ejected', 'mcooldot',
+                    'maccdot_pristine', 'maccdot_reaccrete', 'maccdot_metal_reaccrete',
+                    'maccdot_metal', 'mdot_eject', 'mdot_metal_eject', 'maccdot_radio', 'Metal_hot',
+                    'Metal_ejected', 'snap_num']
         if h_fields is None:
             h_fields = lambda x: x not in ["snap_num"]
         h_dtypes = {"halo_index": 'u4', "halo_id": 'u4', "roothaloid": 'u4', "orig_halo_ID": 'u4'}
@@ -50,12 +52,12 @@ def read_sam(root_dir, g_fields=None, h_fields=None):
             if colname not in h_dtypes.keys():
                 h_dtypes[colname] = 'f4'
 
-        halo_df = pd.read_csv(halo_data, sep=' ', skiprows=len(h_colnames), names=h_colnames, usecols=h_fields,
-                              engine=engine, dtype=h_dtypes)
+        halo_df = pd.read_csv(halo_data, sep=' ', skiprows=len(h_colnames), names=h_colnames,
+                            usecols=h_fields, engine=engine, dtype=h_dtypes)
         halo_dfs.append(halo_df)
 
-        gal_df = pd.read_csv(gal_data, sep=' ', skiprows=len(g_colnames), names=g_colnames, usecols=g_fields,
-                             engine=engine, dtype=g_dtypes)
+        gal_df = pd.read_csv(gal_data, sep=' ', skiprows=len(g_colnames), names=g_colnames,
+                            usecols=g_fields, engine=engine, dtype=g_dtypes)
         gal_dfs.append(gal_df)
 
     halo_data = pd.concat(halo_dfs)
@@ -66,7 +68,6 @@ def read_sam(root_dir, g_fields=None, h_fields=None):
     return halo_data, gal_data
 
 
-if __name__ == "__main__":
 def main():
     rockstar_dir = sys.argv[1].rstrip('/')
     sam_dir = sys.argv[2].rstrip('/')
@@ -87,16 +88,44 @@ def main():
 
     # First attempt to read rockstar file
     for snap in rockstar_snaps:
-        z, boxsize, h, rockstar_data = read_rockstar(rockstar, fields=["Mvir", "X", "Y", "Z"])
+        z, boxsize, h, rockstar_data = read_rockstar(snap, fields=["Mvir", "X", "Y", "Z"])
         snap_z_vals.append(z)
         rockstar_halos.append(rockstar_data)
 
-    haloprop, galprop = read_sam(sam_dir)
+    print(boxsize)
+
+    haloprop, galprop = read_sam(sam_dir, g_fields=["redshift", "sat_type", "mstar", "sfr",
+        "x_position", "y_position", "z_position"], h_fields=[])
 
     haloprop_z = []
     galprop_z = []
+    for z in snap_z_vals:
+        selection = np.isclose(galprop["redshift"].values, z, atol=1e-3)
+        galprop_z.append(galprop_z.drop(columns="redshift").take(np.nonzero(selection)[0]))
+        galprop = galprop.take(np.nonzero(~selection)[0])
 
+    for i in range(len(snaps)):
+        print(snap_z_vals[i], len(rockstar_halos[i]), "halos,", len(galprop_z[i]), "galaxies")
+        catalog_reduced = f"rockstar_sam_tab_reduced_{snaps[i]:03}.hdf5"
+        print("saving catalog to", catalog_reduced)
 
+        halo_pos = rockstar_halos[i][["X", "Y", "Z"]].values
+        gal_pos = galprop_z[i][["x_position", "y_position", "z_position"]].values * h
+        # make sure positions are inside box
+        gal_pos[gal_pos >= boxsize] -= boxsize
+        gal_pos[gal_pos < 0] += boxsize
+        gal_mass = galprop_z[i]["mstar"].values * h * 1e9
+        gal_central = galprop_z[i]["sat_type"].values == 0
+
+        with h5py.File(catalog_reduced, 'w') as f:
+            f.attrs["boxsize"] = boxsize
+            f.attrs["redshift"] = snap_z_vals[i]
+            f.create_dataset("HaloPos", data=halo_pos)
+            f.create_dataset("HaloMass", data=rockstar_halos[i]["Mvir"].values)
+            f.create_dataset("SubhaloPos", data=gal_pos)
+            f.create_dataset("SubhaloStMass", data=gal_mass)
+            f.create_dataset("SubhaloSFR", data=galprop_z[i]["sfr"].values)
+            f.create_dataset("SubhaloCentral", data=gal_central)
 
 
 if __name__ == "__main__":
