@@ -73,9 +73,11 @@ def main():
     sam_dir = sys.argv[2].rstrip('/')
     snaps = sys.argv[3:]
     if isinstance(snaps, list):
-        snaps = map(int, snaps)
+        snaps = list(map(int, snaps))
     else:
         snaps = [int(snaps),]
+
+    print("reducing", len(snaps), "catalogs")
 
     if not os.path.isdir(rockstar_dir):
         raise ValueError(f"'{rockstar_dir}' is not a directory")
@@ -101,7 +103,7 @@ def main():
     galprop_z = []
     for z in snap_z_vals:
         selection = np.isclose(galprop["redshift"].values, z, atol=1e-3)
-        galprop_z.append(galprop_z.drop(columns="redshift").take(np.nonzero(selection)[0]))
+        galprop_z.append(galprop.drop(columns="redshift").take(np.nonzero(selection)[0]))
         galprop = galprop.take(np.nonzero(~selection)[0])
 
     for i in range(len(snaps)):
