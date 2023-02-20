@@ -21,7 +21,7 @@ def read_rockstar(fname, fields=None):
                 h = float(line.split()[-1])
     redshift = 1/a - 1
 
-    if fields=None:
+    if fields == None:
         use_cols = ["Mvir", "M200c", "M200b", "X", "Y", "Z"]
     else:
         use_cols = fields
