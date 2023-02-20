@@ -5,7 +5,7 @@ import pandas as pd
 import h5py
 
 
-def read_rockstar(fname):
+def read_rockstar(fname, fields=None):
     a = 1
     boxsize = 0
     h = 0.67
@@ -21,7 +21,10 @@ def read_rockstar(fname):
                 h = float(line.split()[-1])
     redshift = 1/a - 1
 
-    use_cols = ["Mvir", "M200c", "M200b", "X", "Y", "Z"]
+    if fields=None:
+        use_cols = ["Mvir", "M200c", "M200b", "X", "Y", "Z"]
+    else:
+        use_cols = fields
 
     data = pd.read_csv(fname, comment='#', sep=' ', names=col_names, usecols=use_cols, dtype='f4')
 
