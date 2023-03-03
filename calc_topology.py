@@ -5,6 +5,7 @@ import sys
 from Corrfunc.theory.xi import xi as calc_xi
 import gudhi.representations as gdr
 import numpy as np
+import h5py
 from alpha_complex_periodic import calc_persistence
 from mpi4py import MPI
 from scipy.interpolate import interp1d
@@ -29,6 +30,11 @@ def calc_summary(point_sets, summary, boxsize=None):
     return np.array([summary.fit_transform(DS.fit_transform(p)) for p in pairs])
 
 
+def scale_summary(alpha, summary, lbar, alpha_scaled):
+    interp = interp1d(alpha/lbar, summary, axis=-1, bounds_error=False, fill_value=0, assume_sorted=True)
+    return interp(alpha_scaled) * lbar**3
+
+
 def camels_sam_params(sam_params):
     """Get CAMELS parameter values from SAM parameter values."""
 
@@ -40,25 +46,26 @@ def camels_sam_params(sam_params):
 
 
 def main():
+    max_alpha = 0.2  # maximum alpha value as fraction of box size
     alpha_resolution_factor = 50  # number of alpha grid points per Mpc
-    scaled_range = [0, 5]  # range of alpha / l
-    scaled_resolution = 500  # resolution of alpha / l
-    alpha_scaled = np.linspace(*scaled_range, scaled_resolution)
+    scaled_range = [2e-2, 4]  # range of alpha / l
+    scaled_resolution = 250  # resolution of alpha / l
+    log_scaled = True  # evaluate scaled summary on a log grid
+    if log_scaled:
+        alpha_scaled = np.logspace(*np.log10(scaled_range), scaled_resolution)
+    else:
+        alpha_scaled = np.linspace(*scaled_range, scaled_resolution)
 
-    min_halo_mass_cut = 5e10  # minimum mass cut when selecting DM halos
-    halo_match = True  # match number of galaxies and halos
-    halo_random_sample = True  # randomly sample halos or pick N most massive
+    min_halo_mass_cut = 10**10.5  # minimum mass cut when selecting DM halos
+    halo_mass_bins = [10.5, 11, 11.5, 12, 12.5]  # halo mass bins in terms of log Mvir
 
     st_mass_cut = 5e8  # min stellar mass cut for galaxies
     dm_frac_cut = 0.1  # min DM mass fraction for galaxies
-    max_halo_cut = None  # max halo mass for galaxies
-    satellites = None  # whether to consider only satellites (centrals)
 
     ssfr_cut = 10**-10.5  # sSFR cut for quiescent/star-forming
-    ssfr_match = False  # whether to match number of quiescent/star-forming galaxies
 
     calc_2pcf = True  # whether to calculate 2-point correlation functions
-    n_rbins = 50  # number of r bins for 2pcf
+    n_rbins = 30  # number of r bins for 2pcf (per log Mpc)
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -110,12 +117,9 @@ def main():
     xi_all = []
     xi_ravg_all = []
     lbars_all = []
-    es_all = []
     bc_all = []
-    es_scaled_all = []
     bc_scaled_all = []
     halo_mass_cuts = []
-    ssfr_cuts = []
 
     start_i = offset[rank]
     end_i = start_i + count[rank]
@@ -136,13 +140,11 @@ def main():
             data = load_illustris(sim)
 
         boxsize = data["boxsize"]
-        alpha_range = [0, boxsize/2]
-        alpha_resolution = int(boxsize/2 * alpha_resolution_factor)
+        alpha_range = [0, boxsize * max_alpha]
+        alpha_resolution = int(boxsize * max_alpha * alpha_resolution_factor)
         alpha = np.linspace(*alpha_range, alpha_resolution)
 
-        ES = gdr.Entropy(mode="vector", resolution=alpha_resolution, sample_range=alpha_range,
-                normalized=False)
-        BC = gdr.BettiCurve(resolution=alpha_resolution, sample_range=alpha_range)
+        BC = gdr.BettiCurve(predefined_grid=alpha)
 
         if "sam" not in sim:
             tot_sh_mass = np.sum(data["SubhaloMass"], axis=1)
@@ -152,45 +154,14 @@ def main():
         else:
             # for SAM, only need stellar mass cut
             galaxy = data["SubhaloMass"][:,4] > st_mass_cut
-            # filter out galaxy clusters
-            if max_halo_cut is not None:
-                halo_indicies = data["SubhaloHaloMass"] >= max_halo_cut
-                galaxy *= ~np.isin(data["SubhaloHaloIndex"], halo_indicies)
-            # filter out satellites
-            if satellites is not None:
-                if satellites:
-                    galaxy *= ~data["SubhaloCentral"]
-                else:
-                    galaxy *= data["SubhaloCentral"]
+
         galaxy_selection = data["SubhaloPos"][galaxy]
 
-        if not halo_match:
-            halo_selection = data["HaloPos"][data["HaloMass"] > min_halo_mass_cut]
-        else:
-            n_halos = len(galaxy_selection)
-            if halo_random_sample:
-                halo = np.nonzero(data["HaloMass"] > min_halo_mass_cut)[0]
-                halo = np.random.choice(halo, size=min(len(halo), n_halos), replace=False)
-            else:
-                halo = np.isin(np.arange(len(data["HaloPos"])),
-                        np.argsort(data["HaloMass"])[::-1][:n_halos])
-
-            halo_selection = data["HaloPos"][halo]
-            min_halo_mass_cut = np.min(data["HaloMass"][halo])
-            halo_mass_cuts.append(min_halo_mass_cut)
-            print(f"Halo mass cut: {min_halo_mass_cut:.3e}")
+        halo_selection = data["HaloPos"][data["HaloMass"] > min_halo_mass_cut
 
         ssfr = data["SubhaloSFR"][galaxy] / data["SubhaloMass"][galaxy][:,4]
-        if not ssfr_match:
-            sf_selection = galaxy_selection[ssfr > ssfr_cut]
-            qsnt_selection = galaxy_selection[ssfr <= ssfr_cut]
-        else:
-            ssfr_sort = np.argsort(ssfr)
-            sf_selection = galaxy_selection[ssfr_sort[len(ssfr)//2:]]
-            qsnt_selection = galaxy_selection[ssfr_sort[:len(ssfr)//2]]
-            ssfr_cut = ssfr[len(ssfr)//2]
-            ssfr_cuts.append(ssfr_cut)
-            print(f"sSFR cut: {ssfr_cut:.3e}")
+        sf_selection = galaxy_selection[ssfr > ssfr_cut]
+        qsnt_selection = galaxy_selection[ssfr <= ssfr_cut]
 
         pos_list = [halo_selection, galaxy_selection, sf_selection, qsnt_selection]
         n_selected = np.array([len(pos) for pos in pos_list])
@@ -199,7 +170,7 @@ def main():
 
         if calc_2pcf:
             print("Computing 2PCFs...")
-            rbins = np.logspace(-0.5, np.log10(boxsize/3.1), n_rbins)
+            rbins = np.logspace(-0.1, np.log10(boxsize/5), int(n_rbins*(np.log10(boxsize/5)+0.1)))
             xi = np.zeros((len(pos_list), n_rbins-1))
             xi_ravg = np.zeros_like(xi)
             for i, points in enumerate(pos_list):
@@ -210,28 +181,15 @@ def main():
             xi_ravg_all.append(xi_ravg)
 
         print("Computing topological summaries...")
-        es, bc = calc_summary(pos_list, [ES, BC], boxsize=boxsize)
-        bc = bc / boxsize**3
-        norm = np.trapz(np.abs(es), alpha, axis=-1)
-        es /= np.expand_dims(norm, -1)
-        es_all.append(es)
+        bc = calc_summary(pos_list, BC, boxsize=boxsize) / boxsize**3
         bc_all.append(bc)
 
         print("Scaling and interpolating summaries...")
         lbars = np.array([boxsize/np.cbrt(n) for n in n_selected])
         lbars_all.append(lbars)
-        es_scaled = np.zeros((len(es), 3, scaled_resolution))
-        bc_scaled = np.zeros_like(es_scaled)
-        for i in range(len(es)):
-            interp_es = interp1d(alpha/lbars[i], es[i], axis=-1, bounds_error=False,
-                        fill_value=0, assume_sorted=True)
-            es_scaled[i] = interp_es(alpha_scaled)
-            interp_bc = interp1d(alpha / lbars[i], bc[i], axis=-1, bounds_error=False,
-                        fill_value=0, assume_sorted=True)
-            bc_scaled[i] = interp_bc(alpha_scaled) * lbars[i]**3
-        norm = np.trapz(np.abs(es_scaled), alpha_scaled, axis=-1)
-        es_scaled /= np.expand_dims(norm, -1)
-        es_scaled_all.append(es_scaled)
+        bc_scaled = np.zeros((len(bc), 3, scaled_resolution))
+        for i in range(len(bc)):
+            bc_scaled[i] = scale_summary(alpha, bc, lbars[i], alpha_scaled)
         bc_scaled_all.append(bc_scaled)
 
     params_all = np.array(params_all)
@@ -239,12 +197,8 @@ def main():
     xi_all = np.array(xi_all)
     xi_ravg_all = np.array(xi_ravg_all)
     lbars_all = np.array(lbars_all)
-    es_all = np.array(es_all)
     bc_all = np.array(bc_all)
-    es_scaled_all = np.array(es_scaled_all)
     bc_scaled_all = np.array(bc_scaled_all)
-    halo_mass_cuts = np.array(halo_mass_cuts)
-    ssfr_cuts = np.array(ssfr_cuts)
 
     comm.Barrier()
     if rank == 0:
@@ -256,14 +210,8 @@ def main():
         xi_all = comm.gather(xi_all)
         xi_ravg_all = comm.gather(xi_ravg_all)
     lbars_all = comm.gather(lbars_all)
-    es_all = comm.gather(es_all)
     bc_all = comm.gather(bc_all)
-    es_scaled_all = comm.gather(es_scaled_all)
     bc_scaled_all = comm.gather(bc_scaled_all)
-    if halo_match:
-        halo_mass_cuts = comm.gather(halo_mass_cuts)
-    if ssfr_match:
-        ssfr_cuts = comm.gather(ssfr_cuts)
 
     if rank == 0:
         params = np.vstack(params_all)
@@ -274,14 +222,8 @@ def main():
             xi_all = np.vstack(xi_all)
             xi_ravg_all = np.vstack(xi_ravg_all)
         lbars = np.vstack(lbars_all)
-        es = np.vstack(es_all)
         bc = np.vstack(bc_all)
-        es_scaled = np.vstack(es_scaled_all)
         bc_scaled = np.vstack(bc_scaled_all)
-        if halo_match:
-            halo_mass_cuts = np.hstack(halo_mass_cuts)
-        if ssfr_match:
-            ssfr_cuts = np.hstack(ssfr_cuts)
 
         suite_name = suite.split('/')[-1]
         save_dir = f"topology_summaries/{suite_name}"
@@ -289,11 +231,7 @@ def main():
         save_fname = save_dir + f"/es{'_'+sim_set if sim_set is not None else ''}_all{'_'+save_suffix if save_suffix is not None else ''}.npz"
         print(f"Saving data to {save_fname}")
         np.savez(save_fname, params=params, alpha=alpha, alpha_scaled=alpha_scaled,
-                es=es, es_scaled=es_scaled, bc=bc, bc_scaled=bc_scaled,
-                n_selected=n_selected, lbars=lbars,
-                halo_mass_cut=halo_mass_cuts if halo_match else min_halo_mass_cut,
-                gal_ssfr_cut=ssfr_cuts if ssfr_match else ssfr_cut,
-                gal_st_mass_cut=st_mass_cut, gal_dm_frac_cut=dm_frac_cut,
+                bc=bc, bc_scaled=bc_scaled, n_selected=n_selected, lbars=lbars,
                 xi_ravg=xi_ravg_all if calc_2pcf else None,
                 xi=xi_all if calc_2pcf else None)
 
