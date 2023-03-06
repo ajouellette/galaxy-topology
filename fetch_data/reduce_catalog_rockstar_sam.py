@@ -108,7 +108,7 @@ def main():
 
     for i in range(len(snaps)):
         print(snap_z_vals[i], len(rockstar_halos[i]), "halos,", len(galprop_z[i]), "galaxies")
-        catalog_reduced = f"rockstar_sam_tab_reduced_{snaps[i]:03}.hdf5"
+        catalog_reduced = f"rockstar_sam_tab_{snaps[i]:03}_reduced.hdf5"
         print("saving catalog to", catalog_reduced)
 
         halo_pos = rockstar_halos[i][["X", "Y", "Z"]].values
