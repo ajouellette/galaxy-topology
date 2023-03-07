@@ -1,13 +1,13 @@
 import glob
 import sys
 
-from Corrfunc.theory.xi import xi as calc_xi
 import gudhi.representations as gdr
-import numpy as np
 import h5py
-from alpha_complex_periodic import calc_persistence
+import numpy as np
 from mpi4py import MPI
 from scipy.interpolate import interp1d
+from alpha_complex_periodic import calc_persistence
+from Corrfunc.theory.xi import xi as calc_xi
 
 
 def select_halos(data, min_mass, bins=None, include_upper_bin=True):
@@ -33,13 +33,13 @@ def select_galaxies(data, min_mass, min_dm_frac=0.1, ssfr_cut=10**-10.5):
         galaxies *= data["SubhaloDmFrac"] > min_dm_frac
     galaxies = np.nonzero(galaxies)[0]
     all_pos = data["SubhaloPos"][galaxies]
-    all_type = data["SubhaloCentral"][galaxies]
+    is_centr = data["SubhaloCentral"][galaxies]
 
     ssfr = data["SubhaloSFR"][galaxies] / data["SubhaloStMass"][galaxies]
     sf = ssfr > ssfr_cut
 
-    return [all_pos[sf*all_type], all_pos[sf*(~all_type)],
-            all_pos[(~sf)*all_type], all_pos[(~sf)*(~all_type)]]
+    return [all_pos[sf*is_centr], all_pos[sf*(~is_centr)],
+            all_pos[(~sf)*is_centr], all_pos[(~sf)*(~is_centr)]]
 
 
 def calc_summary(point_sets, summary, boxsize=None, exclude_inf=True):
@@ -62,16 +62,6 @@ def scale_summary(alpha, summary, lbar, alpha_scaled):
     interp = interp1d(alpha/lbar, summary, axis=-1,
             bounds_error=False, fill_value=0, assume_sorted=True)
     return interp(alpha_scaled) * lbar**3
-
-
-def camels_sam_params(sam_params):
-    """Get CAMELS parameter values from SAM parameter values."""
-
-    params = np.copy(sam_params[:,:5])
-    params[:,2] /= 1.7
-    params[:,3] -= 3
-    params[:,4] /= 0.002
-    return params
 
 
 def main():
@@ -111,6 +101,7 @@ def main():
         if rank == 0:
             print("No snapshots found in {sim}")
         sys.exit()
+    snaps.sort()
 
     if rank == 0:
         print(f"Found {len(snaps)} snapshots")
@@ -130,12 +121,11 @@ def main():
     start_i = offset[rank]
     end_i = start_i + count[rank]
     for snap in snaps[start_i:end_i]:
-        print("Starting snapshot", snap)
-
         snap_data = {}
         with h5py.File(snap) as f:
             boxsize = f.attrs["boxsize"]
             redshift = f.attrs["redshift"]
+            print(f"Starting snapshot {snap}, redshift: {redshift:.2f}")
             redshifts.append(redshift)
             for field in f.keys():
                 snap_data[field] = f[field][:]
@@ -148,12 +138,22 @@ def main():
 
         if selection == "halos":
             samples = select_halos(snap_data, min_halo_mass_cut, halo_mass_bins)
+            # actual halo samples wanted: all halos, mass bins
+            samples.insert(0, np.vstack(samples))
+            sample_names = ["all",]
+            sample_names.extend([f"mass_bin{i}" for i in range(len(samples)-1)])
         elif selection == "galaxies":
             samples = select_galaxies(snap_data, st_mass_cut, dm_frac_cut, ssfr_cut)
+            # actual galaxy samples wanted: all galaxies, star-forming, quiescent,
+            #                               all centrals, sf centrals, qsnt centrals
+            samples = [np.vstack(samples), np.vstack(samples[:2]), np.vstack(samples[2:]),
+                    np.vstack(samples[0::2]), samples[0], samples[2]]
+            sample_names = ["all", "sf", "qsnt", "centrals", "sf_centrals", "qsnt_centrals"]
+
 
         n_selected = np.array([len(sample) for sample in samples])
         n_selected_all.append(n_selected)
-        print("Selections:", n_selected)
+        print("Selections: ", [f"{sample_names[i]}: {n_selected[i]}" for i in range(len(samples))])
 
         if calc_2pcf:
             print("Computing 2PCFs...")
