@@ -78,7 +78,7 @@ def main():
     snaps.sort()
     print(f"Found {len(snaps)} snapshots")
 
-    save_dir = f"~/{os.path.basename(sim)}"
+    save_dir = os.path.basename(sim)
     os.makedirs(save_dir, exist_ok=True)
 
     for n in snap_nums:
