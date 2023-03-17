@@ -71,20 +71,54 @@ def reduce_snapshot(snap, save_path=None):
 
         
 def main():
-    sim = sys.argv[1].rstrip('/')
+    sim_path = sys.argv[1].rstrip('/')
     snap_nums = list(map(int, sys.argv[2:]))
+    if len(snap_nums) < 1:
+        raise ValueError("Need to provide list of snapshot numbers")
+    
+    # 1 sim (TNG) or many sims (CAMELS)?
+    if os.path.isdir(f"{sim_path}/output"):
+        # TNG - 1 sim
+        sims = [f"{sim_path}/output",]
+    else:
+        # CAMELS - many sims
+        # exclude EX sims
+        sims_all = glob.glob(f"{sim_path}/[!E]*_*/")
+        # remove duplicate 1P sims
+        sims = []
+        for sim in sims_all:
+            name = os.path.basename(sim.rstrip('/'))
+            if name.count('_') == 1:
+                if name not in ["1P_16", "1P_27", "1P_38", "1P_49", "1P_60"]:
+                    sims.append(sim)
+    
+    if len(sims) > 1:
+        print(f"Found {len(sims)} simulations")
+        sims.sort()
+    
+    for sim in sims:
+        snaps = glob.glob(f"{sim}/groups_*/")
+        if len(snaps) == 0:
+            snaps = glob.glob(f"{sim}/fof_subhalo_tab_*.hdf5")
+            if len(snaps) == 0:
+                print("No snapshots found")
+                sys.exit()
+                
+        snaps.sort()
+        print(f"Found {len(snaps)} snapshots")
 
-    snaps = glob.glob(f"{sim}/output/groups_*")
-    snaps.sort()
-    print(f"Found {len(snaps)} snapshots")
+        if len(sims) == 1:
+            save_dir = os.path.basename(sim.rstrip("/output"))
+        else:
+            save_dir = '/'.join(sim.rstrip('/').split('/')[-2:])
+            
+        print(save_dir)
+        os.makedirs(save_dir, exist_ok=True)
 
-    save_dir = os.path.basename(sim)
-    os.makedirs(save_dir, exist_ok=True)
-
-    for n in snap_nums:
-        snap = snaps[n]
-        print(snap)
-        reduce_snapshot(snap, save_dir)
+        for n in snap_nums:
+            snap = snaps[n]
+            print(snap)
+            reduce_snapshot(snap, save_dir)
 
 
 if __name__ == "__main__":
