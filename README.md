@@ -14,4 +14,4 @@ Code to compute persistent homology of galaxy and dark matter halo distributions
 
 
 ## Paper
-This is the code associated with https://arxiv.org/abs/2302.01363.
+This is the code associated with [2023arXiv230201363O](https://ui.adsabs.harvard.edu/abs/2023arXiv230201363O/abstract).
