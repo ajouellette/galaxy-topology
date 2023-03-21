@@ -68,22 +68,7 @@ def read_sam(root_dir, g_fields=None, h_fields=None):
     return halo_data, gal_data
 
 
-def main():
-    rockstar_dir = sys.argv[1].rstrip('/')
-    sam_dir = sys.argv[2].rstrip('/')
-    snaps = sys.argv[3:]
-    if isinstance(snaps, list):
-        snaps = list(map(int, snaps))
-    else:
-        snaps = [int(snaps),]
-
-    print("reducing", len(snaps), "catalogs")
-
-    if not os.path.isdir(rockstar_dir):
-        raise ValueError(f"'{rockstar_dir}' is not a directory")
-    if not os.path.isdir(sam_dir):
-        raise ValueError(f"'{sam_dir}' is not a directory")
-
+def reduce_sam_catalog(sam_dir, rockstar_dir, snaps, save_dir=None):
     rockstar_snaps = [rockstar_dir + f"/out_{snap}.list" for snap in snaps]
     snap_z_vals = []
     rockstar_halos = []
@@ -108,7 +93,11 @@ def main():
 
     for i in range(len(snaps)):
         print(snap_z_vals[i], len(rockstar_halos[i]), "halos,", len(galprop_z[i]), "galaxies")
+        
         catalog_reduced = f"rockstar_sam_tab_{snaps[i]:03}_reduced.hdf5"
+        if save_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
+            catalog_reduced = save_dir + '/' + catalog_reduced
         print("saving catalog to", catalog_reduced)
 
         halo_pos = rockstar_halos[i][["X", "Y", "Z"]].values
@@ -128,7 +117,80 @@ def main():
             f.create_dataset("SubhaloStMass", data=gal_mass)
             f.create_dataset("SubhaloSFR", data=galprop_z[i]["sfr"].values)
             f.create_dataset("SubhaloCentral", data=gal_central)
-
+            
+            
+def main():
+    # locations of sam and rockstar files
+    sam_base = "/home/jovyan/Data/SCSAM"
+    rockstar_base = "/home/jovyan/Data/Rockstar/CAMELS-SAM"
+    
+    save_dir = "/home/jovyan/home/camels-sam"
+    
+    one_p_sims = {"Asn1x0p25": "1P_1", "Asn1x4p0": "1P_2",
+                  "Asn2x0p25": "1P_3", "Asn2x4p0": "1P_4",
+                  "Aagn1x0p25": "1P_5", "Aagn1x4p0": "1P_6"}
+    
+    def one_p_params(fid_params, sim_name):
+        if sim_name == "1P_1":
+            return fid_params * np.array([1,1,0.25,1,1])
+        elif sim_name == "1P_2":
+            return fid_params * np.array([1,1,4,1,1])
+        elif sim_name == "1P_3":
+            return fid_params - np.array([0,0,0,2,0])
+        elif sim_name == "1P_4":
+            return fid_params + np.array([0,0,0,2,0])
+        elif sim_name == "1P_5":
+            return fid_params * np.array([1,1,1,1,0.25])
+        elif sim_name == "1P_6":
+            return fid_params * np.array([1,1,1,1,4])
+        raise ValueError        
+    
+    # extract data for all simulations at given snapshots
+    snaps = sys.argv[1:]
+    snaps = list(map(int, snaps))
+    
+    sims = glob.glob(sam_base + "/*_*/")
+    sims.remove(sam_base+"/LH_1000/")  # no data in these dirs
+    sims.remove(sam_base+"/CV_5/")
+    
+    print(f"Found {len(sims)} sims")
+    
+    params_all = {}
+    
+    for sim in sims:
+        sim_name = sim.rstrip('/').split('/')[-1]
+        params = np.genfromtxt(sim + "/CosmoAstro_params.txt")[:-1]
+        params_all[sim_name] = params
+        print(sim_name)
+        rockstar_dir = rockstar_base + '/' + sim_name + "/Rockstar"
+        
+        if "CV" in sim_name:
+            sam_dir = sam_base + '/' + sim_name + "/fid-sc-sam"
+            reduce_sam_catalog(sam_dir, rockstar_dir, snaps, save_dir=save_dir+'/'+sim_name)
+            
+            sims_1p = glob.glob(sim + "A*-sc-sam")
+            print(f"Found {len(sims_1p)} 1P sims")
+            for sim_1p in sims_1p:
+                sim_name_1p = sim_1p.rstrip('/').split('/')[-1].rstrip("-sc-sam")
+                sim_name_1p = one_p_sims[sim_name_1p]
+                params_1p = one_p_params(params, sim_name_1p)
+                if sim_name_1p not in params_all.keys():
+                    params_all[sim_name_1p] = params_1p
+                print(sim_name_1p)
+                
+                reduce_sam_catalog(sim_1p, rockstar_dir, snaps, save_dir=save_dir+'/'+sim_name+'/'+sim_name_1p)
+            
+        elif "LH" in sim_name:
+            sam_dir = sam_base + '/' + sim_name + "/sc-sam"
+            reduce_sam_catalog(sam_dir, rockstar_dir, snaps, save_dir=save_dir+'/'+sim_name)
+    
+    with open(save_dir + "/CosmoAstro_params.txt", 'w') as f:
+        for sim in sorted(params_all.keys()):
+            params = params_all[sim]
+            f.write(f"{sim}\t{params[0]:.5f}\t{params[1]:.5f}\t{params[2]:.5f}\t{params[3]:.5f}\t{params[4]:.5f}\n")
+            
+    print("Done.")
+            
 
 if __name__ == "__main__":
     main()
