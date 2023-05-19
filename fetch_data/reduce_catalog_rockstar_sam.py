@@ -82,7 +82,7 @@ def reduce_sam_catalog(sam_dir, rockstar_dir, snaps, save_dir=None):
     print(boxsize)
 
     haloprop, galprop = read_sam(sam_dir, g_fields=["redshift", "sat_type", "mstar", "sfr",
-        "x_position", "y_position", "z_position"], h_fields=[])
+        "x_position", "y_position", "z_position", "vx", "vy", "vz"], h_fields=[])
 
     haloprop_z = []
     galprop_z = []
@@ -105,6 +105,7 @@ def reduce_sam_catalog(sam_dir, rockstar_dir, snaps, save_dir=None):
         # make sure positions are inside box
         gal_pos[gal_pos >= boxsize] -= boxsize
         gal_pos[gal_pos < 0] += boxsize
+        gal_vel = galprop_z[i][["vx", "vy", "vz"]].values
         gal_mass = galprop_z[i]["mstar"].values * h * 1e9
         gal_central = galprop_z[i]["sat_type"].values == 0
 
@@ -114,6 +115,7 @@ def reduce_sam_catalog(sam_dir, rockstar_dir, snaps, save_dir=None):
             f.create_dataset("HaloPos", data=halo_pos)
             f.create_dataset("HaloMass", data=rockstar_halos[i]["Mvir"].values)
             f.create_dataset("SubhaloPos", data=gal_pos)
+            f.create_dataset("SubhaloVel", data=gal_vel)
             f.create_dataset("SubhaloStMass", data=gal_mass)
             f.create_dataset("SubhaloSFR", data=galprop_z[i]["sfr"].values)
             f.create_dataset("SubhaloCentral", data=gal_central)
